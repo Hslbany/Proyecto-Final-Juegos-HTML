@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <title>MI JUEGO</title>
+  <title>Javascript Tetris</title>
   <style>
     body      { font-family: Helvetica, sans-serif; }
     #tetris   { margin: 1em auto; padding: 1em; border: 4px solid black; border-radius: 10px; background-color: #F8F8F8; }
@@ -28,7 +28,7 @@
 
   <div id="tetris">
     <div id="menu">
-      <p id="start"><a href="javascript:play();">Preciona espacio para jugar.</a></p>
+      <p id="start"><a href="javascript:play();">Press Space to Play.</a></p>
       <p><canvas id="upcoming"></canvas></p>
       <p>score <span id="score">00000</span></p>
       <p>rows <span id="rows">0</span></p>
@@ -42,7 +42,7 @@
   <script>
 
     //-------------------------------------------------------------------------
-    //  metodos de ayuda del juego
+    // base helper methods
     //-------------------------------------------------------------------------
 
     function get(id)        { return document.getElementById(id);  }
@@ -65,7 +65,7 @@
     }
 
     //-------------------------------------------------------------------------
-    // contantes del juego
+    // game constants
     //-------------------------------------------------------------------------
 
     var KEY     = { ESC: 27, SPACE: 32, LEFT: 37, UP: 38, RIGHT: 39, DOWN: 40 },
@@ -81,21 +81,36 @@
         nu      = 5;  // width/height of upcoming preview (in blocks)
 
     //-------------------------------------------------------------------------
-    // iniciador del juego definicion de las variables
+    // game variables (initialized during reset)
     //-------------------------------------------------------------------------
 
-    var dx, dy,        
-        blocks,        
-        actions,       
-        playing,       
-        dt,            
-        current,       
-        next,          
-        score,         
-        vscore,       
-        rows,          
-        step;          
+    var dx, dy,        // pixel size of a single tetris block
+        blocks,        // 2 dimensional array (nx*ny) representing tetris court - either empty block or occupied by a 'piece'
+        actions,       // queue of user actions (inputs)
+        playing,       // true|false - game is in progress
+        dt,            // time since starting this game
+        current,       // the current piece
+        next,          // the next piece
+        score,         // the current score
+        vscore,        // the currently displayed score (it catches up to score in small chunks - like a spinning slot machine)
+        rows,          // number of completed rows in the current game
+        step;          // how long before current piece drops by 1 row
 
+    //-------------------------------------------------------------------------
+    // tetris pieces
+    //
+    // blocks: each element represents a rotation of the piece (0, 90, 180, 270)
+    //         each element is a 16 bit integer where the 16 bits represent
+    //         a 4x4 set of blocks, e.g. j.blocks[0] = 0x44C0
+    //
+    //             0100 = 0x4 << 3 = 0x4000
+    //             0100 = 0x4 << 2 = 0x0400
+    //             1100 = 0xC << 1 = 0x00C0
+    //             0000 = 0x0 << 0 = 0x0000
+    //                               ------
+    //                               0x44C0
+    //
+    //-------------------------------------------------------------------------
 
     var i = { size: 4, blocks: [0x0F00, 0x2222, 0x00F0, 0x4444], color: 'cyan'   };
     var j = { size: 3, blocks: [0x44C0, 0x8E00, 0x6440, 0x0E20], color: 'blue'   };
@@ -106,7 +121,8 @@
     var z = { size: 3, blocks: [0x0C60, 0x4C80, 0xC600, 0x2640], color: 'red'    };
 
     //------------------------------------------------
-    // manipulacion de los clockes
+    // do the bit manipulation and iterate through each
+    // occupied block (x,y) for a given piece
     //------------------------------------------------
     function eachblock(type, x, y, dir, fn) {
       var bit, result, row = 0, col = 0, blocks = type.blocks[dir];
@@ -122,7 +138,7 @@
     }
 
     //-----------------------------------------------------
-    // funciones para comprobar si la pieza encaja correctamente
+    // check if a piece can fit into a position in the grid
     //-----------------------------------------------------
     function occupied(type, x, y, dir) {
       var result = false
@@ -138,7 +154,8 @@
     }
 
     //-----------------------------------------
-    // funciones para que salgan al azar los blockes
+    // start with 4 instances of each piece and
+    // pick randomly until the 'bag is empty'
     //-----------------------------------------
     var pieces = [];
     function randomPiece() {
@@ -150,27 +167,27 @@
 
 
     //-------------------------------------------------------------------------
-    // bucle del juego
+    // GAME LOOP
     //-------------------------------------------------------------------------
 
     function run() {
 
-      showStats(); 
-      addEvents(); 
+      showStats(); // initialize FPS counter
+      addEvents(); // attach keydown and resize events
 
       var last = now = timestamp();
       function frame() {
         now = timestamp();
-        update(Math.min(1, (now - last) / 1000.0)); // la funcion que espera la tecla de espacio
+        update(Math.min(1, (now - last) / 1000.0)); // using requestAnimationFrame have to be able to handle large delta's caused when it 'hibernates' in a background or non-visible tab
         draw();
         stats.update();
         last = now;
         requestAnimationFrame(frame, canvas);
       }
 
-      resize(); // configura todo los tamños y forma s del juego
-      reset();  // restablecer el juego
-      frame();  // iniciador del juego
+      resize(); // setup all our sizing information
+      reset();  // reset the per-game variables
+      frame();  // start the first frame
 
     }
 
@@ -185,12 +202,12 @@
     }
 
     function resize(event) {
-      canvas.width   = canvas.clientWidth;  // establecer el tamaño logico y fisico del blocke
-      canvas.height  = canvas.clientHeight; 
+      canvas.width   = canvas.clientWidth;  // set canvas logical size equal to its physical size
+      canvas.height  = canvas.clientHeight; // (ditto)
       ucanvas.width  = ucanvas.clientWidth;
       ucanvas.height = ucanvas.clientHeight;
-      dx = canvas.width  / nx; // tamaño de pixel del blocke
-      dy = canvas.height / ny; 
+      dx = canvas.width  / nx; // pixel size of a single tetris block
+      dy = canvas.height / ny; // (ditto)
       invalidate();
       invalidateNext();
     }
@@ -211,11 +228,11 @@
         handled = true;
       }
       if (handled)
-        ev.preventDefault(); // evite que las teclas de flecha desplacen la pagina
+        ev.preventDefault(); // prevent arrow keys from scrolling the page (supported in IE9+ and all other browsers)
     }
 
     //-------------------------------------------------------------------------
-    // logica del juego
+    // GAME LOGIC
     //-------------------------------------------------------------------------
 
     function play() { hide('start'); reset();          playing = true;  }
@@ -323,7 +340,7 @@
         }
         if (complete) {
           removeLine(y);
-          y = y + 1; //vuelva a verificar la linea del campo de juego
+          y = y + 1; // recheck same line
           n++;
         }
       }
@@ -342,7 +359,7 @@
     }
 
     //-------------------------------------------------------------------------
-    // representacion
+    // RENDERING
     //-------------------------------------------------------------------------
 
     var invalid = {};
@@ -355,7 +372,7 @@
     function draw() {
       ctx.save();
       ctx.lineWidth = 1;
-      ctx.translate(0.5, 0.5); // funcion para crear lineas negras nitidas
+      ctx.translate(0.5, 0.5); // for crisp 1px black lines
       drawCourt();
       drawNext();
       drawScore();
@@ -375,14 +392,14 @@
               drawBlock(ctx, x, y, block.color);
           }
         }
-        ctx.strokeRect(0, 0, nx*dx - 1, ny*dy - 1); // limitacion para segguir con el juego
+        ctx.strokeRect(0, 0, nx*dx - 1, ny*dy - 1); // court boundary
         invalid.court = false;
       }
     }
 
     function drawNext() {
       if (invalid.next) {
-        var padding = (nu - next.type.size) / 2; // funcion para centrar el blocke
+        var padding = (nu - next.type.size) / 2; // half-arsed attempt at centering next piece display
         uctx.save();
         uctx.translate(0.5, 0.5);
         uctx.clearRect(0, 0, nu*dx, nu*dy);
@@ -421,7 +438,7 @@
     }
 
     //-------------------------------------------------------------------------
-    // finalizacion del juego, sigue instrucciones para inicar
+    // FINALLY, lets run the game
     //-------------------------------------------------------------------------
 
     run();
